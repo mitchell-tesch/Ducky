@@ -27,7 +27,7 @@ namespace GhDucky.Components.Import
         public override GH_Exposure Exposure => GH_Exposure.primary;
 
         protected override System.Drawing.Bitmap Icon => IconFactory.Build("🌳", IconFactory.Grasshopper);
-        
+
         private int _inImport;
         private int _inDatabase;
         private int _inData;
@@ -36,17 +36,17 @@ namespace GhDucky.Components.Import
         private int _inTable;
         private int _inSchema;
         private int _inOverwrite;
-        
+
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             _inImport = pManager.AddBooleanParameter("Import?", "I?",
                 "Set to true to perform the import.",
                 GH_ParamAccess.item, false);
             _inDatabase = pManager.AddParameter(new ParamDuckyDbConnection(), "Database", "DB",
-                "Database connection.", 
+                "Database connection.",
                 GH_ParamAccess.item);
             _inTable = pManager.AddTextParameter("Table", "T",
-                "Target table name.", 
+                "Target table name.",
                 GH_ParamAccess.item);
             _inData = pManager.AddGenericParameter("Data", "D",
                 "Data tree. Each branch is one column; items are row values.",
@@ -69,18 +69,18 @@ namespace GhDucky.Components.Import
             pManager[_inTypes].Optional = true;
             pManager[_inSchema].Optional = true;
         }
-        
+
         private int _outDatabase;
         private int _outTable;
         private int _outRows;
-        
+
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             _outDatabase = pManager.AddParameter(new ParamDuckyDbConnection(), "Database", "DB",
-                "Database connection (passthrough).", 
+                "Database connection (passthrough).",
                 GH_ParamAccess.item);
             _outTable = pManager.AddTextParameter("Table", "T",
-                "Imported table name.", 
+                "Imported table name.",
                 GH_ParamAccess.item);
             _outRows = pManager.AddIntegerParameter("Rows", "R",
                 "Row count of the table after the import.",
@@ -96,23 +96,23 @@ namespace GhDucky.Components.Import
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Import is false; no action taken.");
                 return;
             }
-            
+
             if (!TryGetSession(da, _inDatabase, out var session, out var dbConnection))
                 return;
-            
+
             var table = string.Empty;
             if (!da.GetData(_inTable, ref table) || string.IsNullOrWhiteSpace(table))
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Table name required.");
                 return;
             }
-            
+
             if (!da.GetDataTree(_inData, out GH_Structure<IGH_Goo> tree) || tree == null || tree.IsEmpty)
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Data tree is empty.");
                 return;
             }
-            
+
             // Materialize branches as parallel arrays of CLR values.
             var branches = tree.Branches;
             var columnCount = branches.Count;
@@ -130,7 +130,7 @@ namespace GhDucky.Components.Import
             da.GetDataList(_inTypes, columnTypes);
             da.GetData(_inSchema, ref schema);
             da.GetData(_inOverwrite, ref overwrite);
-            
+
             var columns = new object[columnCount][];
             var rowCount = 0;
             for (var c = 0; c < columnCount; c++)
@@ -175,6 +175,12 @@ namespace GhDucky.Components.Import
                             types[i] = existing[i].Type;
                     }
 
+                    // Pre-build a typed append delegate per column to avoid
+                    // the per-cell switch overhead in AppendCell.
+                    var appenders = new Action<IDuckDBAppenderRow, object>[columnCount];
+                    for (var c = 0; c < columnCount; c++)
+                        appenders[c] = BuildCellAppender(types[c]);
+
                     using (var appender = SqlIdentifier.IsExplicitSchema(schema)
                         ? conn.CreateAppender(schema, table)
                         : conn.CreateAppender(table))
@@ -186,14 +192,14 @@ namespace GhDucky.Components.Import
                             {
                                 var col = columns[c];
                                 var raw = r < col.Length ? col[r] : null;
-                                AppendCell(row, raw, types[c]);
+                                appenders[c](row, raw);
                             }
                             row.EndRow();
                         }
                     }
 
-                    rowCount = CountRows(conn, quotedTable);
-
+                    // We already know the row count from the data tree —
+                    // no need for an extra SELECT COUNT(*) round-trip.
                     da.SetData(_outDatabase, dbConnection);
                     da.SetData(_outTable, table);
                     da.SetData(_outRows, rowCount);
@@ -205,7 +211,7 @@ namespace GhDucky.Components.Import
             }
         }
 
-        
+
         private static string BuildCreateTable(string quotedTable, List<string> names, List<DuckyColumnType> types)
         {
             var sb = new System.Text.StringBuilder();
@@ -219,7 +225,7 @@ namespace GhDucky.Components.Import
             return sb.ToString();
         }
 
-        
+
         private static List<(string Name, DuckyColumnType Type)> ReadTableSchema(DuckDBConnection conn, string schema, string table)
         {
             var list = new List<(string Name, DuckyColumnType Type)>();
@@ -235,38 +241,53 @@ namespace GhDucky.Components.Import
             return list;
         }
 
-        
-        private static void AppendCell(IDuckDBAppenderRow row, object value, DuckyColumnType sqlType)
+
+        /// <summary>
+        /// Returns a pre-built delegate that appends a single cell in the
+        /// format the appender expects for the given SQL type in order to avoid
+        /// the per-cell switch overhead that <c>AppendCell</c> had.
+        /// </summary>
+        private static Action<IDuckDBAppenderRow, object> BuildCellAppender(DuckyColumnType sqlType)
         {
-            if (value is null)
-            {
-                row.AppendNullValue();
-                return;
-            }
-
-            var coerced = TypeMapping.CoerceForAppender(value, sqlType);
-
             switch (sqlType)
             {
                 case DuckyColumnType.Boolean:
-                    row.AppendValue((bool?)coerced);
-                    return;
+                    return (row, value) =>
+                    {
+                        if (value is null) { row.AppendNullValue(); return; }
+                        row.AppendValue((bool?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Boolean));
+                    };
                 case DuckyColumnType.Integer:
-                    row.AppendValue((int?)coerced);
-                    return;
+                    return (row, value) =>
+                    {
+                        if (value is null) { row.AppendNullValue(); return; }
+                        row.AppendValue((int?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Integer));
+                    };
                 case DuckyColumnType.BigInt:
-                    row.AppendValue((long?)coerced);
-                    return;
+                    return (row, value) =>
+                    {
+                        if (value is null) { row.AppendNullValue(); return; }
+                        row.AppendValue((long?)TypeMapping.CoerceForAppender(value, DuckyColumnType.BigInt));
+                    };
                 case DuckyColumnType.Double:
-                    row.AppendValue((double?)coerced);
-                    return;
+                    return (row, value) =>
+                    {
+                        if (value is null) { row.AppendNullValue(); return; }
+                        row.AppendValue((double?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Double));
+                    };
                 case DuckyColumnType.Timestamp:
-                    row.AppendValue((DateTime?)coerced);
-                    return;
+                    return (row, value) =>
+                    {
+                        if (value is null) { row.AppendNullValue(); return; }
+                        row.AppendValue((DateTime?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Timestamp));
+                    };
                 case DuckyColumnType.Varchar:
                 default:
-                    row.AppendValue((string)coerced);
-                    return;
+                    return (row, value) =>
+                    {
+                        if (value is null) { row.AppendNullValue(); return; }
+                        row.AppendValue((string)TypeMapping.CoerceForAppender(value, DuckyColumnType.Varchar));
+                    };
             }
         }
     }
