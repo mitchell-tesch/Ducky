@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build and Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+        
+    - name: Restore dependencies
+      run: dotnet restore Ducky.slnx
+      
+    - name: Build
+      run: dotnet build Ducky.slnx --no-restore --configuration Release -m:1
+      
+    - name: Test
+      run: dotnet test Ducky.slnx --no-build --configuration Release --verbosity normal
+
+    - name: Upload Build Artifacts
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: Ducky-${{ matrix.os }}
+        path: |
+          GhDucky/bin/Release/net8.0/
+          !GhDucky/bin/Release/net8.0/*.pdb

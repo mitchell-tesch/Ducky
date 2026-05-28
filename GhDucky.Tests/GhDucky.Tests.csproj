@@ -5,6 +5,7 @@
     <Nullable>disable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <!-- The test runner doesn't need a .gha; produce a normal .dll. -->
     <EnableDynamicLoading>false</EnableDynamicLoading>
     <NoWarn>NU1701</NoWarn>
@@ -55,7 +56,7 @@
                       SetTargetFramework="TargetFramework=net8.0"
                       SetConfiguration="Configuration=$(Configuration)"
                       SetPlatform="Platform=$(Platform)"
-                      AdditionalProperties="EnableDynamicLoading=false;TargetExt=.dll" />
+                      AdditionalProperties="EnableDynamicLoading=false" />
   </ItemGroup>
 
 </Project>

@@ -2,11 +2,15 @@
 	
   <PropertyGroup>
     <EnableDynamicLoading>true</EnableDynamicLoading>
-    <TargetExt>.gha</TargetExt>
     <NoWarn>NU1701</NoWarn>
     <TargetFramework>net8.0</TargetFramework>
     <AssemblyName>Ducky</AssemblyName>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
   </PropertyGroup>
+
+  <Target Name="GenerateGha" AfterTargets="Build">
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFiles="$(OutputPath)$(AssemblyName).gha" />
+  </Target>
   
   <PropertyGroup>
     <Version>0.2.0</Version>
