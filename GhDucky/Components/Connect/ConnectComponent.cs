@@ -76,6 +76,7 @@ namespace GhDucky.Components.Connect
             da.GetData(_inOpen, ref open);
             if (!open)
             {
+                ReleaseCachedSession();
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Connection is closed, set Open to true to open.");
                 return;
             }
@@ -99,8 +100,7 @@ namespace GhDucky.Components.Connect
         /// <summary>
         /// Returns the cached session for this component when the (source, name)
         /// inputs are unchanged and the session is still open; otherwise opens a
-        /// new session, closing any previously cached anonymous in-memory
-        /// session so it does not leak.
+        /// new session, closing the reference to any previously cached session.
         /// </summary>
         private DuckDBSession ReuseOrOpen(string source, string name)
         {
@@ -115,9 +115,8 @@ namespace GhDucky.Components.Connect
                 return cached;
             }
 
-            // Inputs changed (or no live cache). If the previous session was an
-            // anonymous in-memory session we own exclusively, close it first.
-            ReleaseCachedSessionIfAnonymous();
+            // Inputs changed (or no live cache). Release the old session reference first.
+            ReleaseCachedSession();
 
             var session = DuckDBConnectionManager.Open(source, name);
             _cachedSessionId = session.Id;
@@ -126,31 +125,21 @@ namespace GhDucky.Components.Connect
             return session;
         }
 
-        private void ReleaseCachedSessionIfAnonymous()
+        private void ReleaseCachedSession()
         {
             if (string.IsNullOrEmpty(_cachedSessionId))
                 return;
 
-            if (!DuckDBConnectionManager.TryGet(_cachedSessionId, out var prev))
-            {
-                _cachedSessionId = null;
-                return;
-            }
-
-            // Only close the session we opened exclusively for this component.
-            // Named or file-backed sessions are shared via the manager's dedup
-            // table and may still be in use by other components.
-            var isAnonymousInMemory =
-                prev.IsInMemory && string.IsNullOrWhiteSpace(_cachedName);
-            if (isAnonymousInMemory)
-                DuckDBConnectionManager.Close(prev.Id);
-
+            // The manager handles reference counting: the session is only
+            // physically closed and disposed when the last component using
+            // it calls Close().
+            DuckDBConnectionManager.Close(_cachedSessionId);
             _cachedSessionId = null;
         }
 
         public override void RemovedFromDocument(GH_Document document)
         {
-            try { ReleaseCachedSessionIfAnonymous(); }
+            try { ReleaseCachedSession(); }
             catch { /* best-effort cleanup */ }
             base.RemovedFromDocument(document);
         }

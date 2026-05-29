@@ -13,6 +13,9 @@ namespace GhDucky.Services
         private static readonly ConcurrentDictionary<string, DuckDBSession> Sessions =
             new(StringComparer.Ordinal);
 
+        private static readonly ConcurrentDictionary<string, int> RefCounts =
+            new(StringComparer.Ordinal);
+
         private static readonly object SourceLock = new();
         private static readonly Dictionary<string, string> SourceToId =
             new(StringComparer.OrdinalIgnoreCase);
@@ -53,6 +56,7 @@ namespace GhDucky.Services
                         Sessions.TryGetValue(existingId, out var existing) &&
                         existing.IsOpen)
                     {
+                        RefCounts.AddOrUpdate(existingId, 1, (_, count) => count + 1);
                         return existing;
                     }
 
@@ -64,6 +68,7 @@ namespace GhDucky.Services
                     var session = new DuckDBSession(id, canonicalSource, name, isInMemory);
                     Sessions[id] = session;
                     SourceToId[key] = id;
+                    RefCounts[id] = 1;
                     return session;
                 }
             }
@@ -74,6 +79,7 @@ namespace GhDucky.Services
             var anonId = Guid.NewGuid().ToString("N");
             var anonSession = new DuckDBSession(anonId, ":memory:", "memory", true);
             Sessions[anonId] = anonSession;
+            RefCounts[anonId] = 1;
             return anonSession;
         }
 
@@ -97,14 +103,23 @@ namespace GhDucky.Services
             if (string.IsNullOrEmpty(id))
                 return;
 
-            if (!Sessions.TryRemove(id, out var session))
-                return;
-
-            // Clear any cached extension state for this session.
-            DuckDbExtensionTracker.ClearAllForSession(id);
-
             lock (SourceLock)
             {
+                if (!RefCounts.TryGetValue(id, out var count))
+                    return;
+
+                if (count > 1)
+                {
+                    RefCounts[id] = count - 1;
+                    return;
+                }
+
+                // Final reference: clean up and dispose.
+                if (!Sessions.TryRemove(id, out var session))
+                    return;
+
+                DisposeSessionInternal(id, session);
+
                 string keyToRemove = null;
                 foreach (var kv in SourceToId)
                 {
@@ -117,7 +132,12 @@ namespace GhDucky.Services
                 if (keyToRemove != null)
                     SourceToId.Remove(keyToRemove);
             }
+        }
 
+        private static void DisposeSessionInternal(string id, DuckDBSession session)
+        {
+            RefCounts.TryRemove(id, out _);
+            DuckDbExtensionTracker.ClearAllForSession(id);
             session.Dispose();
         }
 
@@ -135,18 +155,24 @@ namespace GhDucky.Services
         /// </summary>
         public static void CloseAll()
         {
-            // Snapshot the keys so we can iterate safely while Close mutates the dictionary.
-            var ids = new List<string>(Sessions.Keys);
-            foreach (var id in ids)
+            lock (SourceLock)
             {
-                try
+                var ids = new List<string>(Sessions.Keys);
+                foreach (var id in ids)
                 {
-                    Close(id);
+                    try
+                    {
+                        if (!Sessions.TryRemove(id, out var session))
+                            continue;
+
+                        DisposeSessionInternal(id, session);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Trace.TraceError($"DuckDBConnectionManager: Failed to close session {id} during teardown. {ex}");
+                    }
                 }
-                catch
-                {
-                    // Best-effort: continue closing remaining sessions.
-                }
+                SourceToId.Clear();
             }
         }
     }

@@ -34,6 +34,12 @@
     <None Include="$(NuGetPackageRoot)rhinocommon\8.0.23304.9001\lib\net48\RhinoCommon.dll"
           CopyToOutputDirectory="PreserveNewest"
           Visible="false" />
+    <None Include="$(NuGetPackageRoot)grasshopper\8.0.23304.9001\lib\net48\Grasshopper.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+    <None Include="$(NuGetPackageRoot)grasshopper\8.0.23304.9001\lib\net48\GH_IO.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
     <None Include="$(NuGetPackageRoot)rhinocommon\8.0.23304.9001\lib\net48\Rhino.UI.dll"
           CopyToOutputDirectory="PreserveNewest"
           Visible="false" />
