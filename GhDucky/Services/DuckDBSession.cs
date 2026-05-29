@@ -1,4 +1,5 @@
 using System;
+using System.Data.Common;
 using System.Threading;
 using DuckDB.NET.Data;
 
@@ -16,14 +17,22 @@ namespace GhDucky.Services
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? id : displayName;
             IsInMemory = isInMemory;
 
-            // Wrap the source in quotes so that paths containing ';' or '='
-            // do not break ADO.NET connection-string parsing.
-            var connectionString = isInMemory
-                ? "DataSource=:memory:"
-                : $"DataSource=\"{source}\"";
+            var builder = new DbConnectionStringBuilder
+            {
+                ["DataSource"] = isInMemory ? ":memory:" : source
+            };
 
-            Connection = new DuckDBConnection(connectionString);
-            Connection.Open();
+            Connection = new DuckDBConnection(builder.ConnectionString);
+            
+            // established practice for .NET UI: wrap unmanaged blocking calls in a task with timeout
+            // to prevent the host application (Rhino) from hanging if the file is locked or on a 
+            // dropped network share.
+            var openTask = System.Threading.Tasks.Task.Run(() => Connection.Open());
+            if (!openTask.Wait(TimeSpan.FromSeconds(15)))
+            {
+                throw new TimeoutException($"Connection to {DisplayName} timed out after 15 seconds. The file may be locked by another process or the network location is inaccessible.");
+            }
+
             CreatedAt = DateTime.UtcNow;
         }
 
@@ -78,8 +87,9 @@ namespace GhDucky.Services
                 if (Connection.State != System.Data.ConnectionState.Closed)
                     Connection.Close();
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Trace.TraceError($"DuckDBSession: Failed to close connection for {DisplayName}. {ex}");
                 // best-effort close
             }
 
