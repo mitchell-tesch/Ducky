@@ -1,5 +1,5 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-	
+
   <PropertyGroup>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <NoWarn>NU1701</NoWarn>
@@ -11,9 +11,9 @@
   <Target Name="GenerateGha" AfterTargets="Build">
     <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFiles="$(OutputPath)$(AssemblyName).gha" />
   </Target>
-  
+
   <PropertyGroup>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <Title>Ducky — DuckDB for Grasshopper</Title>
     <Authors>Mitchell Tesch</Authors>
     <Company>Ducky</Company>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/mitchell-tesch/Ducky</RepositoryUrl>
     <Copyright>Copyright © Mitchell Tesch</Copyright>
   </PropertyGroup>
-  
+
   <ItemGroup>
     <PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.27" />
@@ -39,23 +39,23 @@
     <None Include="../yak/manifest.yml" CopyToOutputDirectory="PreserveNewest" Link="manifest.yml" />
     <None Include="../yak/icon.png" CopyToOutputDirectory="PreserveNewest" Link="icon.png"/>
   </ItemGroup>
-  
+
   <Target Name="BuildYakPackage" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
     <PropertyGroup>
       <YakExecutable Condition="$(YakExecutable) == '' and $([MSBuild]::IsOSPlatform(windows)) and Exists('C:\Program Files\Rhino 8\System\Yak.exe')">C:\Program Files\Rhino 8\System\Yak.exe</YakExecutable>
       <YakExecutable Condition="$(YakExecutable) == '' and $([MSBuild]::IsOSPlatform(macos)) and Exists('/Applications/Rhino 8.app/Contents/Resources/bin/yak')">/Applications/Rhino 8.app/Contents/Resources/bin/yak</YakExecutable>
-      
+
       <BuildYakPackage Condition="$(BuildYakPackage) == '' and $(YakExecutable) != '' and Exists($(YakExecutable))">True</BuildYakPackage>
     </PropertyGroup>
-    
+
     <Warning Text="Could not find Yak executable" Condition="$(YakExecutable) == ''" />
 
     <ItemGroup>
           <YakPackagesToDelete Include="$(OutputPath)\*.yak" />
     </ItemGroup>
-    
+
     <Delete Files="@(YakPackagesToDelete)" />
-    
+
     <Exec Command="&quot;$(YakExecutable)&quot; build" WorkingDirectory="$(OutputPath)" Condition="$(BuildYakPackage) == 'True'" />
 
   </Target>
