@@ -22,13 +22,13 @@ namespace GhDucky.Components.Import
                 "2 | Import")
         {
         }
-        
+
         public override Guid ComponentGuid => new Guid("4f9c5bf8-1c2b-4a7e-9f63-3a8d1c6d2a1b");
 
         public override GH_Exposure Exposure => GH_Exposure.tertiary;
 
         protected override System.Drawing.Bitmap Icon => IconFactory.Build("🦏", IconFactory.Spatial);
-        
+
         private int _inImport;
         private int _inDatabase;
         private int _inTable;
@@ -41,21 +41,21 @@ namespace GhDucky.Components.Import
         private int _inSchema;
         private int _inTolerance;
         private int _inOverwrite;
-        
+
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             _inImport = pManager.AddBooleanParameter("Import?", "I?",
-                "Set to true to perform the import.", 
+                "Set to true to perform the import.",
                 GH_ParamAccess.item, false);
             _inDatabase = pManager.AddParameter(new ParamDuckyDbConnection(), "Database", "DB",
-                "Database connection.", 
+                "Database connection.",
                 GH_ParamAccess.item);
             _inTable = pManager.AddTextParameter("Table", "T",
-                "Target table name.", 
+                "Target table name.",
                 GH_ParamAccess.item);
             _inGeometry = pManager.AddGeometryParameter("Geometry", "G",
-                "Geometry to write.", 
+                "Geometry to write.",
                 GH_ParamAccess.list);
             _inIds = pManager.AddIntegerParameter("Ids", "Id",
                 "Optional integer ids parallel to Geometry. Written to an 'id' column.",
@@ -71,7 +71,7 @@ namespace GhDucky.Components.Import
                 "Defaults to auto-inferred per column.",
                 GH_ParamAccess.list);
             _inGeomColumn = pManager.AddTextParameter("GeomColumn", "Gc",
-                "Name for the geometry column.", 
+                "Name for the geometry column.",
                 GH_ParamAccess.item, "geom");
             _inTolerance = pManager.AddNumberParameter("Tolerance", "Tol",
                 "Tessellation tolerance for non-polyline curves and breps. 0 = use default sampling.",
@@ -95,7 +95,7 @@ namespace GhDucky.Components.Import
         private int _outDatabase;
         private int _outTable;
         private int _outRows;
-        
+
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             _outDatabase = pManager.AddParameter(new ParamDuckyDbConnection(), "Database", "DB",
@@ -118,24 +118,24 @@ namespace GhDucky.Components.Import
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Import is false; no action taken.");
                 return;
             }
-            
+
             if (!TryGetSession(da, _inDatabase, out var session, out var dbConnection))
                 return;
-            
+
             var table = string.Empty;
             if (!da.GetData(_inTable, ref table) || string.IsNullOrWhiteSpace(table))
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "Table name required.");
                 return;
             }
-            
+
             var geometries = new List<IGH_GeometricGoo>();
             if (!da.GetDataList(_inGeometry, geometries) || geometries.Count == 0)
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "No geometry supplied.");
                 return;
             }
-            
+
             var ids = new List<int>();
             da.GetDataList(_inIds, ids);
 
@@ -170,20 +170,20 @@ namespace GhDucky.Components.Import
                 extraNames = TypeMapping.ResolveColumnNames(suppliedNames, columnCount);
                 extraTypes = TypeMapping.ResolveColumnTypes(suppliedTypes, extraColumns);
             }
-            
+
             var geomColumn = "geom";
             da.GetData(_inGeomColumn, ref geomColumn);
             if (string.IsNullOrWhiteSpace(geomColumn)) geomColumn = "geom";
-            
+
             var tolerance = 0.01;
             da.GetData(_inTolerance, ref tolerance);
-            
+
             var schema = "main";
             da.GetData(_inSchema, ref schema);
-            
+
             var overwrite = true;
             da.GetData(_inOverwrite, ref overwrite);
-            
+
             try
             {
                 SpatialExtension.Ensure(session);
@@ -243,26 +243,27 @@ namespace GhDucky.Components.Import
                     {
                         cmd.Transaction = tx;
 
-                        // Build a single multi-row INSERT using a VALUES clause with
+                        // Build the column names header once (it is the same for every batch).
+                        var colNamesHeader = new System.Text.StringBuilder();
+                        colNamesHeader.Append("id, ").Append(quotedGeom);
+                        if (hasExtraData)
+                        {
+                            for (var c = 0; c < extraColumns.Length; c++)
+                                colNamesHeader.Append(", ").Append(SqlIdentifier.Quote(extraNames[c]));
+                        }
+                        var colNamesStr = colNamesHeader.ToString();
+
+                        // Build multi-row INSERTs using a VALUES clause with
                         // ST_GeomFromWKB(unhex(...)) so the spatial conversion happens
                         // in bulk inside DuckDB rather than one round-trip per row.
-                        const int batchSize = 500;
+                        const int batchSize = 2000;
                         for (var batchStart = 0; batchStart < encoded.Length; batchStart += batchSize)
                         {
                             var batchEnd = Math.Min(batchStart + batchSize, encoded.Length);
 
-                            // Column names header (same for every batch).
-                            var colNamesHeader = new System.Text.StringBuilder();
-                            colNamesHeader.Append("id, ").Append(quotedGeom);
-                            if (hasExtraData)
-                            {
-                                for (var c = 0; c < extraColumns.Length; c++)
-                                    colNamesHeader.Append(", ").Append(SqlIdentifier.Quote(extraNames[c]));
-                            }
-
                             var sql = new System.Text.StringBuilder();
                             sql.Append("INSERT INTO ").Append(quotedTable)
-                               .Append(" (").Append(colNamesHeader).Append(") VALUES ");
+                               .Append(" (").Append(colNamesStr).Append(") VALUES ");
 
                             for (var i = batchStart; i < batchEnd; i++)
                             {
@@ -296,9 +297,11 @@ namespace GhDucky.Components.Import
                         tx.Commit();
                     }
 
-                    // Count rows after the import using a fresh command (outside the
-                    // committed transaction) to avoid reusing a stale command state.
-                    var rowCount = CountRows(conn, quotedTable);
+                    // In overwrite mode we know the exact row count without querying.
+                    // In append mode we need to count the full table.
+                    var rowCount = overwrite
+                        ? encoded.Length
+                        : CountRows(conn, quotedTable);
 
                     da.SetData(_outDatabase, dbConnection);
                     da.SetData(_outTable, table);
@@ -311,14 +314,14 @@ namespace GhDucky.Components.Import
             }
         }
 
-        
+
         private static object UnwrapGeometry(IGH_GeometricGoo goo)
         {
             if (goo == null) return null;
             return goo.ScriptVariable() ?? goo;
         }
 
-        
+
         private static string BuildCreateTable(string quotedTable, string quotedGeom,
             List<string> extraNames, List<DuckyColumnType> extraTypes, bool createIfNotExists = false)
         {
@@ -339,7 +342,7 @@ namespace GhDucky.Components.Import
             return sb.ToString();
         }
 
-        
+
 
         /// <summary>
         /// Formats a CLR value as a SQL literal string suitable for inlining in an INSERT statement.

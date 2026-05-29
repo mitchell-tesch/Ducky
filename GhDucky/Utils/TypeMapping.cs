@@ -247,9 +247,12 @@ namespace GhDucky.Utils
 
         /// <summary>
         /// Resolves column types from a user-supplied list, auto-inferring from
-        /// sample values for any missing entries.
+        /// sample values for any missing entries. Samples up to
+        /// <paramref name="maxSampleRows"/> values per column for inference
+        /// instead of scanning every value (large columns benefit significantly).
         /// </summary>
-        public static List<DuckyColumnType> ResolveColumnTypes(IReadOnlyList<string> supplied, object[][] columns)
+        public static List<DuckyColumnType> ResolveColumnTypes(
+            IReadOnlyList<string> supplied, object[][] columns, int maxSampleRows = 1024)
         {
             var types = new List<DuckyColumnType>(columns.Length);
             for (var i = 0; i < columns.Length; i++)
@@ -257,9 +260,25 @@ namespace GhDucky.Utils
                 if (supplied != null && i < supplied.Count && !string.IsNullOrWhiteSpace(supplied[i]))
                     types.Add(DuckyColumnTypeExtensions.ParseOrVarchar(supplied[i]));
                 else
-                    types.Add(InferColumnType(columns[i]));
+                    types.Add(InferColumnType(SampleValues(columns[i], maxSampleRows)));
             }
             return types;
+        }
+
+        /// <summary>
+        /// Returns up to <paramref name="max"/> evenly-spaced samples from the array.
+        /// For small arrays the full array is returned (zero allocation).
+        /// </summary>
+        private static IEnumerable<object> SampleValues(object[] values, int max)
+        {
+            if (values.Length <= max)
+                return values;
+
+            var sampled = new object[max];
+            var step = (double)values.Length / max;
+            for (var i = 0; i < max; i++)
+                sampled[i] = values[(int)(i * step)];
+            return sampled;
         }
 
         /// <summary>
