@@ -22,34 +22,37 @@ namespace GhDucky.Components.Query
                 "3 | Query")
         {
         }
-        
+
         public override Guid ComponentGuid => new Guid("c2b6e21a-7e4d-4d70-9b6f-3a1c5a2a59e9");
 
         public override GH_Exposure Exposure => GH_Exposure.secondary;
 
         protected override System.Drawing.Bitmap Icon => IconFactory.Build("❓", IconFactory.Query);
-        
+
         private int _inRun;
         private int _inDatabase;
         private int _inQuery;
         private int _inLimit;
         private int _inTyped;
-        
+
+        private const int DefaultRowLimit = 1_000_000;
+
 
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             _inRun = pManager.AddBooleanParameter("Run?", "R?",
-                "Set to true to execute the query.", 
+                "Set to true to execute the query.",
                 GH_ParamAccess.item, false);
             _inDatabase = pManager.AddParameter(new ParamDuckyDbConnection(), "Database", "DB",
-                "Database connection.", 
+                "Database connection.",
                 GH_ParamAccess.item);
             _inQuery = pManager.AddTextParameter("Query", "Q",
                 "SQL query to execute. SELECT statements return a result tree; other statements report the rows-affected count.",
                 GH_ParamAccess.item);
             _inLimit = pManager.AddIntegerParameter("Limit", "L",
-                "Maximum number of rows to fetch. 0 (default) returns all rows. Useful for reducing large return data.",
-                GH_ParamAccess.item, 0);
+                "Maximum number of rows to fetch. Defaults to 1,000,000 to guard against excessive memory use; " +
+                "set to 0 to return all rows (use with care on large result sets).",
+                GH_ParamAccess.item, DefaultRowLimit);
             _inTyped = pManager.AddBooleanParameter("Typed?", "T?",
                 "If true (default), temporal columns (DATE/TIME/TIMESTAMP) surface as GH_Time so downstream date arithmetic works. " +
                 "If false, those values are emitted as ISO 8601 strings.",
@@ -58,25 +61,25 @@ namespace GhDucky.Components.Query
             pManager[_inLimit].Optional = true;
             pManager[_inTyped].Optional = true;
         }
-        
+
         private int _outColumns;
         private int _outTypes;
         private int _outData;
-        private int _outRows;      
+        private int _outRows;
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
             _outColumns = pManager.AddTextParameter("Columns", "N",
-                "Column names, parallel to the branches of Data.", 
+                "Column names, parallel to the branches of Data.",
                 GH_ParamAccess.list);
             _outTypes = pManager.AddTextParameter("Types", "T",
-                "Column data types, parallel to the branches of Data.", 
+                "Column data types, parallel to the branches of Data.",
                 GH_ParamAccess.list);
             _outData = pManager.AddGenericParameter("Data", "D",
-                "Result data tree: one branch per column, items are row values.", 
+                "Result data tree: one branch per column, items are row values.",
                 GH_ParamAccess.tree);
             _outRows = pManager.AddIntegerParameter("Rows", "R",
-                "Row count of the result set (0 for non-SELECT queries).", 
+                "Row count of the result set (0 for non-SELECT queries).",
                 GH_ParamAccess.item);
         }
 
@@ -89,20 +92,21 @@ namespace GhDucky.Components.Query
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Run is false; query not executed.");
                 return;
             }
-            
+
             if (!TryGetSession(da, _inDatabase, out var session))
                 return;
-            
+
             var query = string.Empty;
             if (!da.GetData(_inQuery, ref query) || string.IsNullOrWhiteSpace(query))
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "SQL query required.");
                 return;
             }
-            
-            var limit = 0;
+
+            var limit = DefaultRowLimit;
             da.GetData(_inLimit, ref limit);
-            
+            if (limit < 0) limit = 0;
+
             var typed = true;
             da.GetData(_inTyped, ref typed);
 
@@ -113,7 +117,7 @@ namespace GhDucky.Components.Query
                     var effectiveSql = limit > 0
                         ? $"SELECT * FROM ({query.TrimEnd(';')}) AS __ghducky_sub LIMIT {limit.ToString(CultureInfo.InvariantCulture)}"
                         : query;
-                    session.Execute(conn => ExecuteReader(conn, effectiveSql, typed, da));
+                    session.Execute(conn => ExecuteReader(conn, effectiveSql, typed, limit, da));
                 }
                 else
                 {
@@ -136,7 +140,7 @@ namespace GhDucky.Components.Query
             }
         }
 
-        
+
         private static bool IsLikelyResultProducing(string sql)
         {
             var trimmed = sql.TrimStart();
@@ -173,8 +177,8 @@ namespace GhDucky.Components.Query
                    trimmed.StartsWith("FROM", StringComparison.OrdinalIgnoreCase);
         }
 
-        
-        private void ExecuteReader(DuckDBConnection dbConnection, string sql, bool typed, IGH_DataAccess da)
+
+        private void ExecuteReader(DuckDBConnection dbConnection, string sql, bool typed, int limit, IGH_DataAccess da)
         {
             using var cmd = dbConnection.CreateCommand();
             cmd.CommandText = sql;
@@ -215,6 +219,13 @@ namespace GhDucky.Components.Query
             da.SetDataList(_outTypes, columnTypes);
             da.SetDataTree(_outData, dataTree);
             da.SetData(_outRows, rowCount);
+
+            if (limit > 0 && rowCount >= limit)
+            {
+                AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
+                    $"Row limit of {limit.ToString("N0", CultureInfo.InvariantCulture)} reached; results may be truncated. " +
+                    "Increase the Limit input (or set to 0 for no limit) to fetch more rows.");
+            }
         }
     }
 }
