@@ -23,7 +23,7 @@ namespace GhDucky.Components.Query
                 "3 | Query")
         {
         }
-        
+
         public override Guid ComponentGuid => new Guid("8d9f4a82-4b1d-4fb1-93f2-2c7d2c5f0a1c");
 
         public override GH_Exposure Exposure => GH_Exposure.secondary;
@@ -36,14 +36,16 @@ namespace GhDucky.Components.Query
         private int _inGeomColumn;
         private int _inLimit;
         private int _inTyped;
-        
+
+        private const int DefaultRowLimit = 1_000_000;
+
         protected override void RegisterInputParams(GH_InputParamManager pManager)
         {
             _inRun = pManager.AddBooleanParameter("Run?", "R?",
-                "Set to true to execute the query.", 
+                "Set to true to execute the query.",
                 GH_ParamAccess.item, false);
             _inDatabase = pManager.AddParameter(new ParamDuckyDbConnection(), "Database", "DB",
-                "Database connection.", 
+                "Database connection.",
                 GH_ParamAccess.item);
             _inQuery = pManager.AddTextParameter("Query", "SQL",
                 "SQL query to execute. SELECT statements return a result tree; The geometry column named by GeomColumn is rewritten to its WKB form automatically.",
@@ -52,8 +54,9 @@ namespace GhDucky.Components.Query
                 "Name of the geometry column in the result set.",
                 GH_ParamAccess.item, "geom");
             _inLimit = pManager.AddIntegerParameter("Limit", "L",
-                "Maximum number of rows to fetch. 0 (default) returns all rows. Useful for reducing large return data.",
-                GH_ParamAccess.item, 0);
+                "Maximum number of rows to fetch. Defaults to 1,000,000 to guard against excessive memory use; " +
+                "set to 0 to return all rows (use with care on large result sets).",
+                GH_ParamAccess.item, DefaultRowLimit);
             _inTyped = pManager.AddBooleanParameter("Typed?", "Ty?",
                 "If true (default), temporal columns (DATE/TIME/TIMESTAMP) surface as GH_Time so downstream date arithmetic works. " +
                 "If false, those values are emitted as ISO 8601 strings.",
@@ -66,7 +69,7 @@ namespace GhDucky.Components.Query
         private int _outGeometry;
         private int _outColumns;
         private int _outData;
-        private int _outRows;     
+        private int _outRows;
 
         protected override void RegisterOutputParams(GH_OutputParamManager pManager)
         {
@@ -80,7 +83,7 @@ namespace GhDucky.Components.Query
                 "Non-geometry result data tree: one branch per column, items are row values.",
                 GH_ParamAccess.tree);
             _outRows = pManager.AddIntegerParameter("Rows", "R",
-                "Row count of the result set (0 for non-SELECT queries).", 
+                "Row count of the result set (0 for non-SELECT queries).",
                 GH_ParamAccess.item);
         }
 
@@ -93,17 +96,17 @@ namespace GhDucky.Components.Query
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Remark, "Run is false; query not executed.");
                 return;
             }
-            
+
             if (!TryGetSession(da, _inDatabase, out var session))
                 return;
-            
+
             string query = null;
             if (!da.GetData(_inQuery, ref query) || string.IsNullOrWhiteSpace(query))
             {
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "SQL required.");
                 return;
             }
-            
+
             var geomColumn = "geom";
             da.GetData(_inGeomColumn, ref geomColumn);
             if (string.IsNullOrWhiteSpace(geomColumn))
@@ -111,13 +114,14 @@ namespace GhDucky.Components.Query
                 AddRuntimeMessage(GH_RuntimeMessageLevel.Error, "GeomColumn required.");
                 return;
             }
-            
-            var limit = 0;
+
+            var limit = DefaultRowLimit;
             da.GetData(_inLimit, ref limit);
-            
+            if (limit < 0) limit = 0;
+
             var typed = true;
             da.GetData(_inTyped, ref typed);
-            
+
             try
             {
                 SpatialExtension.Ensure(session);
@@ -207,6 +211,13 @@ namespace GhDucky.Components.Query
                     da.SetDataList(_outColumns, nonGeomColumnNames);
                     da.SetDataTree(_outData, dataTree);
                     da.SetData(_outRows, rowCount);
+
+                    if (limit > 0 && rowCount >= limit)
+                    {
+                        AddRuntimeMessage(GH_RuntimeMessageLevel.Warning,
+                            $"Row limit of {limit.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} reached; results may be truncated. " +
+                            "Increase the Limit input (or set to 0 for no limit) to fetch more rows.");
+                    }
                 });
             }
             catch (Exception ex)
@@ -215,7 +226,7 @@ namespace GhDucky.Components.Query
             }
         }
 
-        
+
         private static IGH_Goo DecodeGeometry(object raw, ref string warningAccumulator)
         {
             if (raw is null) return null;
