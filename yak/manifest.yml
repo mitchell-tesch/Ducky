@@ -1,10 +1,10 @@
 ---
 name: ducky
-version: 0.3.0
+version: 0.5.0
 authors:
 - Mitchell Tesch
 description: >
-  DuckDB integration for Grasshopper. Open in-memory or file-backed databases, load CSV/JSON/Parquet/Excel and Grasshopper data trees, query in SQL, export results, and round-trip Rhino geometry through the DuckDB spatial extension.
+  DuckDB integration for Grasshopper. Open in-memory or file-backed databases, load CSV/JSON/Parquet/Excel and Grasshopper data trees, query in SQL, export results, and round-trip Rhino geometry through the DuckDB spatial extension. Also provides fast, COM-free direct Excel read/write components for cell- and range-level access to xlsx/xlsm workbooks.
 url: https://github.com/mitchell-tesch/Ducky
 icon: icon.png
 keywords:
@@ -16,6 +16,9 @@ keywords:
     - csv
     - excel
     - xlsx
+    - xlsm
+    - spreadsheet
+    - openxml
     - spatial
     - wkb
     - analytics
