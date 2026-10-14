@@ -56,7 +56,35 @@
     <None Include="../yak/icon.png" CopyToOutputDirectory="PreserveNewest" Link="icon.png"/>
   </ItemGroup>
 
-  <Target Name="BuildYakPackage" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+  <!--
+    `dotnet test` builds this project as a dependency with EnableDynamicLoading
+    set to false, which strips the dependency DLLs and native runtimes from the
+    output. Packaging that would yield a ~0.2 MB yak that installs cleanly and
+    then fails at runtime, so skip packaging entirely unless the output is the
+    full, dynamically-loadable plugin.
+  -->
+  <PropertyGroup>
+    <ShouldPackageYak Condition="'$(Configuration)' == 'Release' and '$(EnableDynamicLoading)' == 'true'">true</ShouldPackageYak>
+  </PropertyGroup>
+
+  <!--
+    Rhino 8 ships for Windows and macOS only, but DuckDB.NET.Data.Full carries
+    native binaries for linux-x64 and linux-arm64 as well. Those two account for
+    ~42 MB of the compressed package and can never be loaded by Rhino.
+
+    The Yak server rejects uploads over 100 MB with an opaque HTTP 500, so the
+    full five-runtime package (~103 MB) cannot be published at all. Pruning the
+    unusable Linux natives brings it to ~61 MB.
+  -->
+  <Target Name="RemoveUnusedRuntimes" AfterTargets="Build" BeforeTargets="BuildYakPackage" Condition="'$(ShouldPackageYak)' == 'true'">
+    <ItemGroup>
+      <UnusedRuntimeFiles Include="$(OutputPath)runtimes\linux-*\**\*" />
+    </ItemGroup>
+    <Delete Files="@(UnusedRuntimeFiles)" />
+    <RemoveDir Directories="$(OutputPath)runtimes\linux-x64;$(OutputPath)runtimes\linux-arm64" />
+  </Target>
+
+  <Target Name="BuildYakPackage" AfterTargets="Build" Condition="'$(ShouldPackageYak)' == 'true'">
     <PropertyGroup>
       <YakExecutable Condition="$(YakExecutable) == '' and $([MSBuild]::IsOSPlatform(windows)) and Exists('C:\Program Files\Rhino 8\System\Yak.exe')">C:\Program Files\Rhino 8\System\Yak.exe</YakExecutable>
       <YakExecutable Condition="$(YakExecutable) == '' and $([MSBuild]::IsOSPlatform(macos)) and Exists('/Applications/Rhino 8.app/Contents/Resources/bin/yak')">/Applications/Rhino 8.app/Contents/Resources/bin/yak</YakExecutable>
@@ -73,6 +101,25 @@
     <Delete Files="@(YakPackagesToDelete)" />
 
     <Exec Command="&quot;$(YakExecutable)&quot; build" WorkingDirectory="$(OutputPath)" Condition="$(BuildYakPackage) == 'True'" />
+
+    <!--
+      Two failure modes have bitten this project, both silent:
+
+      1. `dotnet test` rebuilds this project with EnableDynamicLoading=false,
+         which strips the dependency DLLs and native runtimes from bin/. A yak
+         build straight afterwards produces a ~0.2 MB package that installs
+         cleanly and then fails at runtime. Always rebuild before packaging.
+      2. The Yak server rejects packages over 100 MB with an opaque HTTP 500.
+
+      Catch both here, at build time, rather than after a bad upload.
+
+      Implemented as a PowerShell Exec because MSBuild has no allowlisted
+      property function for reading a file's size. Guarded to Windows, which is
+      where releases are cut; on CI the Yak executable is absent so neither this
+      target nor the check runs.
+    -->
+    <Exec Condition="$(BuildYakPackage) == 'True' and $([MSBuild]::IsOSPlatform(windows))"
+          Command="powershell -NoProfile -Command &quot;$p = Get-ChildItem '$(OutputPath)*.yak' | Select-Object -First 1; if (-not $p) { Write-Error 'No .yak package was produced.'; exit 1 }; $mb = [math]::Round($p.Length/1MB, 2); $n = $p.Name; if ($p.Length -lt 10MB) { Write-Error (\&quot;Yak package is only $mb MB - dependencies are missing. This happens after 'dotnet test' strips bin/. Run: dotnet build GhDucky/GhDucky.csproj -c Release\&quot;); exit 1 }; if ($p.Length -gt 100MB) { Write-Error (\&quot;Yak package is $mb MB, over the 100 MB Yak server limit. The upload will fail with an opaque HTTP 500.\&quot;); exit 1 }; Write-Host (\&quot;Yak package OK: $n - $mb MB\&quot;)&quot;" />
 
   </Target>
 
