@@ -179,7 +179,7 @@ namespace GhDucky.Components.Import
                     // the per-cell switch overhead in AppendCell.
                     var appenders = new Action<IDuckDBAppenderRow, object>[columnCount];
                     for (var c = 0; c < columnCount; c++)
-                        appenders[c] = BuildCellAppender(types[c]);
+                        appenders[c] = DuckDbAppenderFactory.BuildCellAppender(types[c]);
 
                     using (var appender = SqlIdentifier.IsExplicitSchema(schema)
                         ? conn.CreateAppender(schema, table)
@@ -239,56 +239,6 @@ namespace GhDucky.Components.Import
             while (reader.Read())
                 list.Add((reader.GetString(0), DuckyColumnTypeExtensions.ParseOrVarchar(reader.GetString(1))));
             return list;
-        }
-
-
-        /// <summary>
-        /// Returns a pre-built delegate that appends a single cell in the
-        /// format the appender expects for the given SQL type in order to avoid
-        /// the per-cell switch overhead that <c>AppendCell</c> had.
-        /// </summary>
-        private static Action<IDuckDBAppenderRow, object> BuildCellAppender(DuckyColumnType sqlType)
-        {
-            switch (sqlType)
-            {
-                case DuckyColumnType.Boolean:
-                    return (row, value) =>
-                    {
-                        if (value is null) { row.AppendNullValue(); return; }
-                        row.AppendValue((bool?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Boolean));
-                    };
-                case DuckyColumnType.Integer:
-                    return (row, value) =>
-                    {
-                        if (value is null) { row.AppendNullValue(); return; }
-                        row.AppendValue((int?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Integer));
-                    };
-                case DuckyColumnType.BigInt:
-                    return (row, value) =>
-                    {
-                        if (value is null) { row.AppendNullValue(); return; }
-                        row.AppendValue((long?)TypeMapping.CoerceForAppender(value, DuckyColumnType.BigInt));
-                    };
-                case DuckyColumnType.Double:
-                    return (row, value) =>
-                    {
-                        if (value is null) { row.AppendNullValue(); return; }
-                        row.AppendValue((double?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Double));
-                    };
-                case DuckyColumnType.Timestamp:
-                    return (row, value) =>
-                    {
-                        if (value is null) { row.AppendNullValue(); return; }
-                        row.AppendValue((DateTime?)TypeMapping.CoerceForAppender(value, DuckyColumnType.Timestamp));
-                    };
-                case DuckyColumnType.Varchar:
-                default:
-                    return (row, value) =>
-                    {
-                        if (value is null) { row.AppendNullValue(); return; }
-                        row.AppendValue((string)TypeMapping.CoerceForAppender(value, DuckyColumnType.Varchar));
-                    };
-            }
         }
     }
 }

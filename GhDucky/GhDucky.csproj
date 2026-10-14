@@ -13,14 +13,14 @@
   </Target>
 
   <PropertyGroup>
-    <Version>0.3.0</Version>
+    <Version>0.5.0</Version>
     <Title>Ducky — DuckDB for Grasshopper</Title>
     <Authors>Mitchell Tesch</Authors>
     <Company>Ducky</Company>
-    <Description>DuckDB integration for Grasshopper. Open in-memory or file-backed databases, load CSV/JSON/Parquet/Excel and Grasshopper data trees, query in SQL, export results, and round-trip Rhino geometry through the DuckDB spatial extension.</Description>
+    <Description>DuckDB integration for Grasshopper. Open in-memory or file-backed databases, load CSV/JSON/Parquet/Excel and Grasshopper data trees, query in SQL, export results, and round-trip Rhino geometry through the DuckDB spatial extension. Also provides fast, COM-free direct Excel read/write components for cell- and range-level access to xlsx/xlsm workbooks.</Description>
     <PackageProjectUrl>https://github.com/mitchell-tesch/Ducky</PackageProjectUrl>
     <PackageLicenseUrl>https://github.com/mitchell-tesch/Ducky/LICENSE</PackageLicenseUrl>
-    <PackageTags>duckdb;sql;database;data;rhino;grasshopper;parquet;csv;excel;xlsx;spatial;wkb;analytics</PackageTags>
+    <PackageTags>duckdb;sql;database;data;rhino;grasshopper;parquet;csv;excel;xlsx;xlsm;spreadsheet;openxml;spatial;wkb;analytics</PackageTags>
     <RepositoryUrl>https://github.com/mitchell-tesch/Ducky</RepositoryUrl>
     <Copyright>Copyright © Mitchell Tesch</Copyright>
   </PropertyGroup>
@@ -29,6 +29,22 @@
     <PackageReference Include="Grasshopper" Version="8.0.23304.9001" ExcludeAssets="runtime" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.27" />
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.3" />
+    <!--
+      Excel components (Ducky Excel Read / Write / Info) — deliberately COM-free.
+
+      MiniExcel.OpenXml (Apache-2.0) drives the *read* path: it streams xlsx
+      without loading the workbook into memory and natively supports A1 range
+      reads, open-ended ranges, sheet dimensions and typed cell values.
+      Referenced directly rather than via the `MiniExcel` metapackage so the
+      unused CSV provider is not shipped in the .gha.
+
+      DocumentFormat.OpenXml (MIT) drives the *write* path. MiniExcel cannot
+      modify an existing sheet without destroying it (its only write verbs
+      replace a whole sheet or file), so anchored, style-preserving in-place
+      cell writes are done through the OpenXML SDK instead.
+    -->
+    <PackageReference Include="MiniExcel.OpenXml" Version="2.0.0-preview.4" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.0" />
   </ItemGroup>
 
   <ItemGroup>

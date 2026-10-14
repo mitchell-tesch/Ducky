@@ -1,0 +1,49 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Looking Glass workflow: start Rhino yourself on the VM console
+      // (Session 1), then attach from this SSH session.
+      "name": "Attach to Rhino 8 (console session)",
+      "type": "coreclr",
+      "request": "attach",
+      "processName": "Rhino",
+      "justMyCode": false,
+      "requireExactSource": false
+    },
+    {
+      "name": "Attach to Rhino (pick process)",
+      "type": "coreclr",
+      "request": "attach",
+      "processId": "${command:pickProcess}",
+      "justMyCode": false,
+      "requireExactSource": false
+    },
+    {
+      // Only usable when VS Code runs on the interactive desktop, not over SSH.
+      "name": "Rhino 8 - netcore (launch)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "",
+      "osx": {
+        "program": "/Applications/Rhino 8.app/Contents/MacOS/Rhinoceros",
+        "args": [
+          "-runscript=_Grasshopper"
+        ]
+      },
+      "windows": {
+        "program": "C:\\Program Files\\Rhino 8\\System\\Rhino.exe",
+        "targetArchitecture": "x86_64",
+        "args": "/netcore /runscript=\"_Grasshopper\""
+      },
+      "env": {
+        "RHINO_PACKAGE_DIRS": "${workspaceFolder}/GhDucky/bin/Debug"
+      },
+      "cwd": "${workspaceFolder}/GhDucky",
+      "stopAtEntry": false,
+      "console": "internalConsole"
+    }
+  ],
+  "compounds": []
+}
